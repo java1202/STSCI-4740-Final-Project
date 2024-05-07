@@ -1,0 +1,188 @@
+---
+title:"Yung RF"
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r}
+library(leaps)
+set.seed(1)
+red_wine <- read.csv("winequality-red.csv", sep = ";")
+white_wine <- read.csv("winequality-white.csv", sep = ";")
+summary(red_wine)
+summary(white_wine)
+```
+
+Exploratory Data Analysis
+I started the EDA by first examine if there is any skew in the dataset as well as seeing the general distribution of the 2. It is interesting to further look into the dataset since there are so many variables and some of them will significantly impact the future analysis if we do not take them into factors.
+
+```{r}
+set.seed(1)
+library(ggplot2)
+library(dplyr)
+install.packages("corrplot")
+library(corrplot)
+visualize_distribution <- function(df, dataset_name) {
+  input_vars <- names(df)[1:11]
+  hist_plots <- lapply(input_vars, function(var) {
+    ggplot(df, aes_string(x = var)) +
+      geom_histogram(bins = 30, fill = "blue", color = "white", alpha = 0.7) +
+      labs(title = paste("Distribution of", var, "in", dataset_name), x = var) +
+      theme_minimal()
+  })
+  box_plots <- lapply(input_vars, function(var) {
+    ggplot(df, aes_string(x = "factor(quality)", y = var)) +
+      geom_boxplot() +
+      labs(title = paste("Boxplot of", var, "by quality in", dataset_name), x = "Quality") +
+      theme_minimal()
+  })
+  return(list(histograms = hist_plots, boxplots = box_plots))
+}
+red_wine_visuals <- visualize_distribution(red_wine, "Red Wine")
+white_wine_visuals <- visualize_distribution(white_wine, "White Wine")
+print(red_wine_visuals$histograms[[1]])
+print(red_wine_visuals$boxplots[[1]])
+print(white_wine_visuals$histograms[[1]])
+print(white_wine_visuals$boxplots[[1]])
+corr_red <- cor(red_wine[, 1:11])
+corr_white <- cor(white_wine[, 1:11])
+corrplot(corr_red, method = "circle", title = "Correlation Matrix - Red Wine", mar = c(0, 0, 1, 0))
+corrplot(corr_white, method = "circle", title = "Correlation Matrix - White Wine", mar = c(0, 0, 1, 0))
+table(red_wine$quality)
+table(white_wine$quality)
+```
+
+This part is mainly about examine the correlation among the variables and how they will impact the outcome of our predictions. We also do some initial analysis by plotting the graph by counting the frequency for the variables, just to have some grasps about how the data perform in general or if there is any outliers for both dataset.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(caret)
+install.packages("ggcorrplot")
+library(ggcorrplot)
+library(GGally)
+library(cluster)
+install.packages("factoextra")
+library(factoextra)
+library(cowplot)
+library(randomForest)
+detect_outliers <- function(df, var) {
+  Q1 <- quantile(df[[var]], 0.25)
+  Q3 <- quantile(df[[var]], 0.75)
+  IQR <- Q3 - Q1
+  outliers <- df |>
+    filter(df[[var]] < (Q1 - 1.5 * IQR) | df[[var]] > (Q3 + 1.5 * IQR))
+  return(outliers)
+}
+red_outliers <- lapply(names(red_wine)[1:11], detect_outliers, df = red_wine)
+white_outliers <- lapply(names(white_wine)[1:11], detect_outliers, df = white_wine)
+set.seed(123)
+red_rf <- randomForest(quality ~ ., data = red_wine, importance = TRUE)
+white_rf <- randomForest(quality ~ ., data = white_wine, importance = TRUE)
+red_imp <- varImpPlot(red_rf, main = "Red Wine - Feature Importance")
+white_imp <- varImpPlot(white_rf, main = "White Wine - Feature Importance")
+pca_visualization <- function(df, dataset_name) {
+  pca <- prcomp(df[, 1:11], scale. = TRUE)
+  pca_df <- data.frame(pca$x)
+  pca_df$quality <- df$quality
+  
+  ggplot(pca_df, aes(PC1, PC2, color = factor(quality))) +
+    geom_point(alpha = 0.7) +
+    labs(title = paste("PCA Clustering for", dataset_name), color = "Quality") +
+    theme_minimal()
+}
+red_pca_plot <- pca_visualization(red_wine, "Red Wine")
+white_pca_plot <- pca_visualization(white_wine, "White Wine")
+```
+
+In the graphs above, I mainly want to explore how different variables can affect the performance if we do model analysis as it is a very significant factor to consider. And the graph clearly demonstrates the the importance of each variables.
+
+```{r}
+set.seed(1)
+# Perform best subset selection for white wines
+regfit.full_white <- regsubsets(quality ~ ., data = white_wine, nvmax = 12)
+reg.summary_white <- summary(regfit.full_white)
+(reg.summary_white)
+(reg.summary_white$adjr2)
+# Find best subset based on BIC
+best_subset_white <- which.min(reg.summary_white$bic)
+# Perform best subset selection for red wines
+regfit.full_red <- regsubsets(quality ~ ., data = red_wine, nvmax = 12)
+reg.summary_red <- summary(regfit.full_red)
+(reg.summary_red)
+(reg.summary_red$adjr2)
+# Find best subset based on BIC
+best_subset_red <- which.min(reg.summary_red$bic)
+```
+
+Here we are just running the best subset selection so that we can run the future model using this as a reference. It is also important to note that we are looking for the one that has the smallest BIC is the set of predictors that we are going to use.
+
+```{r}
+set.seed(1)
+par(mfrow = c(1,2))
+plot(regfit.full_red, scale = "bic", main = 'Best subset for red wines')
+plot(regfit.full_white, scale = "bic", main = 'Best subset for white wines')
+```
+
+In this case, we are just grpahing the best subset based on the result above.
+
+```{r}
+library(caret)
+library(randomForest)
+set.seed(1)
+adjusted_r2 <- function(r2, n, p) {
+  return(1 - ((1 - r2) * (n - 1) / (n - p - 1)))
+}
+aic_calculator <- function(n, mse, num_params) {
+  return(n * log(mse) + 2 * num_params)
+}
+ctrl <- trainControl(method = "cv", number = 10)
+model_white_rf <- train(
+  quality ~ volatile.acidity + citric.acid + chlorides + free.sulfur.dioxide +
+    total.sulfur.dioxide + pH + sulphates + alcohol,
+  data = white_wine,
+  method = "rf",
+  trControl = ctrl
+)
+white_rf_results <- model_white_rf$results
+best_white_rf <- model_white_rf$bestTune
+final_model_white_rf <- model_white_rf$finalModel
+white_r2 <- max(white_rf_results$Rsquared)
+n_white <- nrow(white_wine)
+p_white <- ncol(white_wine) - 1 
+white_adj_r2 <- adjusted_r2(white_r2, n_white, p_white)
+white_rf_predictions <- predict(final_model_white_rf, newdata = white_wine)
+white_mse <- mean((white_wine$quality - white_rf_predictions)^2)
+white_aic <- aic_calculator(n_white, white_mse, p_white)
+model_red_rf <- train(
+  quality ~ volatile.acidity + citric.acid + chlorides + free.sulfur.dioxide +
+    total.sulfur.dioxide + pH + sulphates + alcohol,
+  data = red_wine,
+  method = "rf",
+  trControl = ctrl
+)
+red_rf_results <- model_red_rf$results
+best_red_rf <- model_red_rf$bestTune
+final_model_red_rf <- model_red_rf$finalModel
+red_r2 <- max(red_rf_results$Rsquared)
+n_red <- nrow(red_wine)
+p_red <- ncol(red_wine) - 1
+red_adj_r2 <- adjusted_r2(red_r2, n_red, p_red)
+red_rf_predictions <- predict(final_model_red_rf, newdata = red_wine)
+red_mse <- mean((red_wine$quality - red_rf_predictions)^2)
+red_aic <- aic_calculator(n_red, red_mse, p_red)
+cat("Best Random Forest model for white wine quality:\n")
+print(best_white_rf)
+cat("\nWhite wine performance metrics:\n")
+cat("Adjusted R^2:", white_adj_r2, "\n")
+cat("MSE:", white_mse, "\n")
+cat("AIC:", white_aic, "\n")
+cat("\nBest Random Forest model for red wine quality:\n")
+print(best_red_rf)
+cat("\nRed wine performance metrics:\n")
+cat("Adjusted R^2:", red_adj_r2, "\n")
+cat("MSE:", red_mse, "\n")
+cat("AIC:", red_aic, "\n")
+```
+
+Lastly, I performed the random forest model to train the model so that we can get the best adjusted r square, mse, aic. We can tell that from the result, it is probably not the best model to run for this specific dataset since a lot of the performance metrics are extremely poor.
