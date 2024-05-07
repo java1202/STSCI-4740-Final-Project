@@ -1,0 +1,155 @@
+---
+title: "Exploratory Data Analysis"
+output: pdf_document
+date: "2024-05-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+EXPLORATORY DATA ANALYSIS
+
+We began our EDA by conducting a preliminary review of the 2 datasets in terms of the number of data points, summary statistics of each predictor, and mean values of the outcome variable 'quality' in red and white wines.
+```{r}
+#Loading the data into 2 different dataframes
+redwines <- read.csv('winequality-red.csv', sep = ';')
+whitewines <- read.csv('winequality-white.csv', sep = ';')
+
+#No. of rows in both datasets
+nrow(redwines)
+nrow(whitewines)
+```
+The number of rows of data available for red  wines is 1599, while there are 4898 data points for white wines.
+```{r}
+#Summary of all the red and white wines predictors
+summary(redwines)
+summary(whitewines)
+```
+This is a summary of all the variables that make up both datasets. While it is difficult to draw any valuable conclusions from this directly, we see that the means quality of both types of wine are fairly similar - 5.636 vs. 5.878.
+
+To further examine the distribution of the outcome variable between the 2 datasets, histograms in the following manner can be plotted:
+```{r}
+par(mfrow = c(1,2))
+hist(redwines$quality, xlab = 'Quality', main = 'Histogram of Red wines Quality')
+hist(whitewines$quality, xlab = 'Quality', main = 'Histogram of White wines Quality')
+```
+Both appear to show a similar normal distribution representing a peak between 5 and 6 and tapering at the sides. There seems to be slightly more variance in the quality of white wines as they spread across more evenly, while the red wines' qualities are very closely concentrated around 5 and 6. This gives us some evidence that the 2 datasets might have different underlying true models, and should therefore be approached separately.
+
+
+The correlations between each of the variables were then looked at, to check for any noticeable interaction effects that stood out. This would provide us insight to construct our models while accounting for any confounding interactions that would otherwise distort the fitting of any model we apply. 
+```{r}
+cor_table_red <- cor(redwines)
+cor_table_white <- cor(whitewines)
+```
+Plotting heatmaps to better visualize the interaction between variables in both datasets.
+```{r}
+library(reshape2)
+
+corr_mat_red <- round(cor_table_red,2)
+dist <- as.dist((1-corr_mat_red)/2)
+hc <- hclust(dist)
+corr_mat_red <-corr_mat_red[hc$order, hc$order]
+melted_corr_mat_red <- melt(corr_mat_red)
+library(ggplot2)
+ggplot(data = melted_corr_mat_red, aes(x=Var1, y=Var2, fill=value)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  geom_tile() + 
+  scale_fill_distiller(palette = "Reds") + 
+  ggtitle('Correlation Heatmap for Red wines') + 
+  geom_text(aes(Var2, Var1, label = value), 
+          color = "white", size = 4)
+
+corr_mat_white <- round(cor_table_white,2)
+dist <- as.dist((1-corr_mat_white)/2)
+hc <- hclust(dist)
+corr_mat_white <-corr_mat_white[hc$order, hc$order]
+melted_corr_mat_white <- melt(corr_mat_white)
+library(ggplot2)
+ggplot(data = melted_corr_mat_white, aes(x=Var1, y=Var2, fill=value)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  geom_tile() + 
+  scale_fill_gradient(low = "#86ebc9",
+                    high = "#09855c",
+                    guide = "colorbar") +
+  ggtitle('Correlation Heatmap for White wines') + 
+  geom_text(aes(Var2, Var1, label = value), 
+          color = "white", size = 4)
+```
+
+The correlations between each predictor and the outcome variable were then calculated individually. The predictors and their correlations were then sorted in decreasing order.
+```{r}
+process_correlations <- function(dataset, title) {
+  correlation_matrix <- cor(dataset[, sapply(dataset, is.numeric)], use="complete.obs")
+  
+  #print(correlation_matrix)
+  
+  melted_corr <- melt(correlation_matrix)
+
+  heatmap_plot <- ggplot(data = melted_corr, aes(x = Var1, y = Var2, fill = value)) +
+    geom_tile(color = "white") +
+    scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0,
+                         limit = c(-1, 1), space = "Lab", name = "Correlation") +
+    theme_minimal() + 
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+    labs(title = paste(title, "Correlation Heatmap"), x = "", y = "")
+  
+  quality_correlations <- correlation_matrix["quality",]
+  sorted_correlations <- sort(abs(quality_correlations), decreasing = TRUE, na.last = NA)
+  
+  sorted_features <- quality_correlations[names(sorted_correlations[-1])]  # Exclude "quality" itself
+  
+  # Print all features against "quality" based on absolute correlation
+  print(paste(title, "All Predictors Against Quality in Descending Order:"))
+  print(sorted_features)
+}
+  
+
+process_correlations(redwines, "Red Wine")
+process_correlations(whitewines, "White Wine")
+```
+As seen above, the variable 'alcohol' seems to be the most important feature in predicting the quality of both red and white wines. Therefore, we decided to visualize its association with wine quality through 2 boxplots to investigate any obvious trends.
+
+
+```{r}
+require(gridExtra)
+plot1 <- ggplot(redwines, aes(x = factor(quality), y = alcohol)) +
+  geom_boxplot(aes(fill = factor(quality))) +
+  ggtitle("Alcohol Distribution by Red Wine Quality") +
+  xlab("Quality") +
+  ylab("Alcohol")
+plot2 <- ggplot(whitewines, aes(x = factor(quality), y = alcohol)) +
+  geom_boxplot(aes(fill = factor(quality))) +
+  ggtitle("Alcohol Distribution by Red Wine Quality") +
+  xlab("Quality") +
+  ylab("Alcohol")
+grid.arrange(plot1, plot2, nrow=2)
+```
+
+  
+  To gauge the linearity of the model, we applied preliminary linear models to look at the distribution of residuals of each predicted value. A Q-Q plot was also made to examine whether residuals followed a normal distribution.
+```{r}
+prelim_linear_white <- glm(whitewines$quality ~ 
+                       whitewines$fixed.acidity + whitewines$volatile.acidity + whitewines$citric.acid + 
+                       whitewines$residual.sugar + whitewines$chlorides + whitewines$free.sulfur.dioxide + 
+                       whitewines$total.sulfur.dioxide + whitewines$density + whitewines$pH + whitewines$pH + 
+                       whitewines$sulphates + whitewines$alcohol,
+            family = gaussian(link = "identity"), data = whitewines)
+
+prelim_linear_red <- glm(redwines$quality ~ 
+                       redwines$fixed.acidity + redwines$volatile.acidity + redwines$citric.acid + 
+                       redwines$residual.sugar + redwines$chlorides + redwines$free.sulfur.dioxide + 
+                       redwines$total.sulfur.dioxide + redwines$density + redwines$pH + redwines$pH + 
+                       redwines$sulphates + redwines$alcohol,
+            family = gaussian(link = "identity"), data = redwines)
+
+summary(prelim_linear_white)
+summary(prelim_linear_red)
+par(mfrow = c(2,2))
+plot(prelim_linear_white, which = 1, main = 'Residuals Plot for White Wines')
+plot(prelim_linear_white, which = 2, main = 'Q-Q Plot for White Wines')
+
+plot(prelim_linear_red, which = 1, main = 'Residuals Plot for Red Wines')
+plot(prelim_linear_red, which = 2, main = 'Q-Q Plot for Red Wines')
+```
+Both residual plots above illustrate an extremely non-random scattering of residuals above the horizontal line, indicating a non-linear association between the predictors and outcome. This, in addition to the extreme deviations of the residuals in the Q-Q plots shows that a linear regression would not be appropriate to model either of the red or white wine datasets.

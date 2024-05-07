@@ -1,0 +1,69 @@
+---
+title: "Generalized Additive Model"
+output: pdf_document
+date: "2024-05-07"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+MODEL SELECTION 
+
+
+We decided to apply best subset selection as our method of model selection as it considers all possible combinations of features while determining the set that would produce the highest performing model. As the number of predictors 'p' here is only 11, it is still a computationally feasible approach. We implemented the method on white and red wine datasets separately as the distribution of the outcome variable was slightly different - calling for separate approaches in how we predict the quality of each type. After summarizing the results of the best subset calculated at each possible number of predictors, we plotted curves to determine the subsets that produced lowest BIC values. Results from the white dataset showed that the most optimal number of predictors for any model in general was 8 and for the red wines - 6. This plots also helped us choose which predictors were of highest importance at these respective model sizes.
+
+```{r}
+
+#install.packages('leaps')
+library(leaps)
+redwines <- read.csv('winequality-red.csv', sep = ';')
+whitewines <- read.csv('winequality-white.csv', sep = ';')
+regfit.full_white <- regsubsets(whitewines$quality ~ ., data = whitewines, nvmax = 12)
+reg.summary_white <- summary(regfit.full_white)
+(reg.summary_white)
+names(reg.summary_white)
+(reg.summary_white$adjr2)
+which.min(reg.summary_white$bic)
+
+regfit.full_red <- regsubsets(redwines$quality ~ ., data = redwines, nvmax = 12)
+reg.summary_red <- summary(regfit.full_red)
+(reg.summary_red)
+names(reg.summary_red)
+(reg.summary_red$adjr2)
+which.min(reg.summary_red$bic)
+
+par(mfrow = c(1,2))
+
+plot(regfit.full_red, scale = "bic", main = 'Best subset for red wines')
+plot(regfit.full_white, scale = "bic", main = 'Best subset for white wines')
+```
+
+
+Once we determined the best subset of predictors to train the model on, we chose to use a Generalized Additive Model to explore the possibility that each feature followed varying true models, and should thus be approached using an additive technique. This allows us to apply non-linear relationships to the data with additional flexibility of each predictor's contributions being considered separately The smoothing parameter here is automatically tuned using the gam(), which uses a technique known as backfitting. Therefore, there was no need for manual tuning of hyperparameters in this case.
+
+We see that the model outputs a 10-fold cross validation RMSE of 0.7267, an R-squared of 0.3355, and MAE of  0.5697 using the most optimal model where select = TRUE. This hyperparameter was automatically determined, and signifies that the most optimal of the 2 possible GAM models applies additional penalties on the model curve to spaces where the effect of splining is null. These regions are known as null spaces, and the TRUE option likely uses less effective degrees of freedom than its FALSE counterpart.
+
+When applied separately using the previously mentioned best subset for the red wines data, we obtain an RMSE of 0.6397, an R-squared of 0.3754, and MAE of  0.4966, which are not significant improvements from the white wine's GAM model.
+
+```{r}
+
+library(mgcv)
+library(boot)
+library(caret)
+
+set.seed(1)
+ctrl <- trainControl(method = "cv")
+
+model_white <- train(quality ~ fixed.acidity + volatile.acidity + residual.sugar + free.sulfur.dioxide + density + pH + sulphates + alcohol, data = whitewines, method = "gam", trControl = ctrl)
+
+model_white
+
+#model_gam <- gam(quality ~ s(volatile.acidity) + s(total.sulfur.dioxide) + s(chlorides) + s(pH) + s(sulphates) + s(alcohol), data = redwines)
+
+#plot(model_gam)
+
+model_red <- train(quality ~ volatile.acidity + total.sulfur.dioxide + chlorides + pH + sulphates + alcohol, data = redwines, method = "gam", trControl = ctrl)
+
+model_red
+```
