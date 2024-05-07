@@ -1,0 +1,322 @@
+---
+title: "Model - Final Project"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Since the red and white tastes are quite different, the analysis will be performed separately.
+red <- read.csv("winequality-red.csv", sep=";")
+white <- read.csv("winequality-white.csv", sep=";")
+
+red$color_variant <- "Red"
+white$color_variant <- "White"
+wines <- bind_rows(red, white)
+
+summary(red)
+summary(white)
+
+
+# Convert quality to a factor
+wines$quality <- as.factor(wines$quality)
+table(wines$quality)
+
+features <- names(wines)[names(wines) != "color_variant"]
+
+```
+
+```{r}
+#After calculating multicollinearity, we see that desntiy has a very high VIF which indicates a strong correlation with other predictors.
+library(car)
+
+trainWhite <- white %>% select(-color_variant)
+
+lmFit <- lm(quality ~ ., data = trainWhite)
+vif_values <- vif(lmFit)
+print(vif_values)
+
+# Remove density due to high multicollinearity. Updated VIF results show that the multicollinearity issue has been significantly reduced after removing density
+trainWhite <- trainWhite %>% select(-density)
+lmFit <- lm(quality ~ ., data = trainWhite)
+vif_values <- vif(lmFit)
+print(vif_values)
+
+```
+
+```{r}
+
+#Explore higher-order polynomial relationships and interactions among features that could better predict wine quality
+
+#For 10 remaining predictors, adding polynomial terms up to degree 2 and all interactions results in many more features.There are 10 remaining original predictors.
+
+# Load necessary library
+library(caret)
+
+expand_polynomial <- function(data, degree = 4) {
+  # Extract the target variable
+  target <- data$quality
+  
+  # Select all numeric predictors, excluding the target variable
+  predictors <- data %>% select(-quality)
+  
+  # Initialize an empty list to store expanded features
+  expanded_list <- list()
+  
+  # Loop through each predictor to add polynomial terms up to the specified degree
+  for (col in names(predictors)) {
+    # Generate polynomial terms for this column
+    polynomial_terms <- poly(predictors[[col]], degree = degree, raw = TRUE)
+    
+    # Set proper column names for the polynomial terms
+    colnames(polynomial_terms) <- paste0(col, "_poly_", 1:degree)
+    
+    # Add the polynomial terms to the list
+    expanded_list[[col]] <- polynomial_terms
+  }
+  
+  # Combine all polynomial features into a single data frame
+  expanded_df <- do.call(cbind, expanded_list)
+  
+  # Add the target variable back into the expanded data frame
+  expanded_df <- as.data.frame(expanded_df)
+  expanded_df$quality <- target
+  
+  return(expanded_df)
+}
+
+# Apply the expansion function to the training data
+train_poly <- expand_polynomial(trainWhite, degree = 2)
+
+# Verify the expanded feature set
+print(head(train_poly))
+
+```
+
+
+```{r}
+
+#K-Fold Cross-Validation (K-Folds = 10): We'll split the expanded dataset into 10 folds. Then, for each fold:
+#We'll train the Lasso regression model on the remaining 9 folds.
+#We'll evaluate the model's performance on the held-out fold.
+#This process will be repeated for each fold, ensuring that each data point is used for both training and testing exactly once.
+
+library(glmnet)
+library(caret)
+
+# Extract predictors (X) and response variable (y)
+X <- as.matrix(train_poly[, -ncol(train_poly)])
+y <- train_poly$quality
+
+set.seed(1)
+num_folds <- 10
+folds <- createFolds(y, k = num_folds)
+
+# Initialize vectors to store results
+test_r_squared <- numeric(num_folds)
+test_mse <- numeric(num_folds)
+aic_values <- numeric(num_folds)
+
+
+# Perform cross-validated Lasso regression
+for (i in 1:num_folds) {
+  X_train <- X[-folds[[i]], ]
+  y_train <- y[-folds[[i]]]
+  X_test <- X[folds[[i]], ]
+  y_test <- y[folds[[i]]]
+  
+  # Train Lasso regression model
+  lasso_model <- cv.glmnet(X_train, y_train, alpha = 1, nfolds = num_folds)
+  
+  # Plot the cross-validated mean squared error (MSE) against log(lambda)
+  plot(lasso_model)
+  
+  # Get the optimal lambda value with the lowest MSE
+  optimal_lambda <- lasso_model$lambda.min
+  #cat("Optimal lambda value:", optimal_lambda, "\n")
+  plot(lasso_model$glmnet.fit, 
+     "lambda", label=FALSE)
+  
+  # Fit the final Lasso model with the optimal lambda
+  final_model <- glmnet(X_train, y_train, alpha = 1, lambda = optimal_lambda)
+
+  #coefficients <- coef(final_model)
+    # Predict on test set
+  y_pred <- predict(final_model, s = optimal_lambda, newx = X_test)
+
+    # Calculate R^2
+  test_r_squared[i] <- cor(y_pred, y_test)^2
+  
+  # Calculate MSE
+  test_mse[i] <- mean((y_pred - y_test)^2)
+  
+}
+
+# Calculate average test R^2 and MSE
+average_test_r_squared <- mean(test_r_squared)
+average_test_mse <- mean(test_mse)
+average_aic <- mean(aic_values)
+
+# Print results
+cat("Average Test R-squared (White):", average_test_r_squared, "\n")
+cat("Average Test MSE (White):", average_test_mse, "\n")
+```
+
+Now we are starting the model building for the RED Wine. 
+
+```{r}
+#RED
+
+trainRed <- red %>% select(-color_variant)
+
+lmFit <- lm(quality ~ ., data = trainRed)
+vif_values <- vif(lmFit)
+print(vif_values)
+
+# Remove density due to high multicollinearity. Updated VIF results show that the multicollinearity issue has been significantly reduced after removing density
+trainRed <- trainRed %>% select(-density)
+lmFit <- lm(quality ~ ., data = trainRed)
+vif_values <- vif(lmFit)
+print(vif_values)
+
+```
+
+```{r}
+
+library(caret)
+
+expand_polynomial <- function(data, degree = 4) {
+  # Extract the target variable
+  target <- data$quality
+  
+  # Select all numeric predictors, excluding the target variable
+  predictors <- data %>% select(-quality)
+  
+  # Initialize an empty list to store expanded features
+  expanded_list <- list()
+  
+  # Loop through each predictor to add polynomial terms up to the specified degree
+  for (col in names(predictors)) {
+    # Generate polynomial terms for this column
+    polynomial_terms <- poly(predictors[[col]], degree = degree, raw = TRUE)
+    
+    # Set proper column names for the polynomial terms
+    colnames(polynomial_terms) <- paste0(col, "_poly_", 1:degree)
+    
+    # Add the polynomial terms to the list
+    expanded_list[[col]] <- polynomial_terms
+  }
+  
+  # Combine all polynomial features into a single data frame
+  expanded_df <- do.call(cbind, expanded_list)
+  
+  # Add the target variable back into the expanded data frame
+  expanded_df <- as.data.frame(expanded_df)
+  expanded_df$quality <- target
+  
+  return(expanded_df)
+}
+
+# Apply the expansion function to the training data
+train_poly2 <- expand_polynomial(trainRed, degree = 2)
+
+# Verify the expanded feature set
+print(head(train_poly2))
+
+```
+
+```{r}
+
+
+library(glmnet)
+library(caret)
+
+# Extract predictors (X) and response variable (y)
+X2 <- as.matrix(train_poly2[, -ncol(train_poly2)])
+y2 <- train_poly2$quality
+
+set.seed(1)
+num_folds2 <- 10
+folds2 <- createFolds(y2, k = num_folds2)
+
+# Initialize vectors to store results
+test_r_squared2 <- numeric(num_folds2)
+test_mse2 <- numeric(num_folds2)
+aic_values2 <- numeric(num_folds2)
+
+
+# Perform cross-validated Lasso regression
+for (i in 1:num_folds2) {
+  X_train2 <- X[-folds2[[i]], ]
+  y_train2 <- y[-folds2[[i]]]
+  X_test2 <- X[folds2[[i]], ]
+  y_test2 <- y[folds2[[i]]]
+  
+  # Train Lasso regression model
+  lasso_model2 <- cv.glmnet(X_train2, y_train2, alpha = 1, nfolds = num_folds2)
+  
+  # Plot the cross-validated mean squared error (MSE) against log(lambda)
+  #plot(lasso_model)
+  
+  # Get the optimal lambda value with the lowest MSE
+  optimal_lambda2 <- lasso_model2$lambda.min
+  #cat("Optimal lambda value:", optimal_lambda, "\n")
+  #plot(lasso_model$glmnet.fit, 
+  #   "lambda", label=FALSE)
+  
+  # Fit the final Lasso model with the optimal lambda
+  final_model2 <- glmnet(X_train2, y_train2, alpha = 1, lambda = optimal_lambda)
+  
+  #coefficients <- coef(final_model)
+    # Predict on test set
+  y_pred2 <- predict(final_model2, s = optimal_lambda2, newx = X_test2)
+  
+    # Calculate R^2
+  test_r_squared2[i] <- cor(y_pred2, y_test2)^2
+  
+  # Calculate MSE
+  test_mse2[i] <- mean((y_pred2 - y_test2)^2)
+  
+  # Calculate AIC
+  #deviance <- deviance(final_model)
+  #num_coeffs <- sum(coef(final_model) != 0)
+  #aic <- 2 * num_coeffs + deviance
+  #aic_values[i] = aic
+}
+
+
+# Calculate average test R^2 and MSE
+average_test_r_squared2 <- mean(test_r_squared2)
+average_test_mse2 <- mean(test_mse2)
+average_aic2 <- mean(aic_values2)
+
+# Print results
+cat("Average Test R-squared (Red):", average_test_r_squared2, "\n")
+cat("Average Test MSE (Red):", average_test_mse2, "\n")
+#cat("Average AIC:", average_aic, "\n")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
