@@ -1,0 +1,71 @@
+---
+title: "Logistic Regression"
+output:
+  pdf_document: default
+  html_document: default
+date: "2024-05-06"
+---
+
+## Logistic Regression on White Wine
+
+```{r}
+library(caret)
+library(Metrics)
+
+data <- read.csv("winequality-white.csv", header = TRUE, sep = ";")
+
+# Binarize the quality variable for logistic regression
+data$quality <- factor(ifelse(data$quality >= 7, "High", "Low"))
+
+# LOOCV
+fitControl <- trainControl(method = "LOOCV", classProbs = TRUE) # Ensure class probabilities can be calculated
+model <- train(quality ~ ., data = data, method = "glm", family = "binomial", trControl = fitControl)
+
+# Prediction
+predictions <- predict(model, newdata = data, type = "prob")[,"High"]
+
+# Test MSE
+test_mse <- mse(as.numeric(data$quality == "High"), predictions)
+
+# Relevant metrics for logistic regression
+library(pROC)
+roc_result <- roc(response = as.numeric(data$quality == "High"), predictor = predictions)
+auc_value <- auc(roc_result)
+conf_matrix <- confusionMatrix(predict(model, newdata = data), data$quality)
+
+list(MSE = test_mse, AUC = auc_value, Accuracy = conf_matrix$overall['Accuracy'], Sensitivity = conf_matrix$byClass['Sensitivity'], Specificity = conf_matrix$byClass['Specificity'])
+
+```
+
+## Logistic Regression on Red Wine
+
+```{r}
+library(caret)
+library(pROC)
+
+data <- read.csv("winequality-red.csv", header = TRUE, sep = ";")
+
+# Binarize the quality variable for logistic regression
+data$quality <- factor(ifelse(data$quality >= 7, "High", "Low"))
+
+# LOOCV for logistic regression
+fitControl <- trainControl(method = "LOOCV", classProbs = TRUE, summaryFunction = twoClassSummary) # Adjust for classification
+model <- train(quality ~ ., data = data, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+
+# Prediction
+predictions <- predict(model, newdata = data, type = "prob")[,"High"]
+
+# Test MSE
+test_mse <- mse(as.numeric(data$quality == "High"), predictions)
+
+# Other relevant metrics
+roc_result <- roc(response = as.numeric(data$quality == "High"), predictor = predictions)
+auc_value <- auc(roc_result)
+conf_matrix <- confusionMatrix(predict(model, newdata = data), data$quality)
+
+# Output
+list(MSE = test_mse, AUC = auc_value, Accuracy = conf_matrix$overall['Accuracy'], Sensitivity = conf_matrix$byClass['Sensitivity'], Specificity = conf_matrix$byClass['Specificity'])
+
+```
+
+In this logistic regression model, we attempted to replicate similar logistic regression models we learned in class to predict the quality of white wine. However, in order to apply the model well, we needed to binarize the quality variable to fit a logistic regression model. The first aspect we tackle is binarizing the quality variable into High and Low. In order to perform effective comparative analysis with the other models, we decided to use LOOCV as standard cross validation measure. Since we are using the most optimal k-fold cross validation method, LOOCV, and binarizing the quality variable to fit the logistic regression, post consulation, we decided that it would be best to fit the model directly rather than add a layer of variable selection. Best subset selection and stepwise selection performed worse and had been too computationally intensive. Thus, to fit a simple logistic regression model and achieve the most optimal outcome metrics, we programmed the metrics that are most relevant to a logistic regression model, including test MSE, AUC, Accuracy, Sensitivity, and Specificity, which encompass AUC, ROC, and a Confusion Matrix. The same process is applied to red wine. Our combinations of the methods resulted in the most optimal outcome metrics.
